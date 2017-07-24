@@ -1,0 +1,253 @@
+---
+title: "data_explore"
+author: "Bingfeng Xia"
+date: "3/29/2017"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rcompanion)
+library(mgcv)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+library(xgboost)
+library(gbm)
+library(Matrix)
+```
+
+## 1 upload data
+```{r uploadData}
+train = read.csv(file = "train.csv", header = T)
+#test = read.csv(file = "test.csv", header = T)
+#train.new = train
+
+
+```
+
+
+## discrepancy
+```{r discrepancy}
+
+#unit_discrepancy<-function(x,y) x*log(y) + (1-x)log(1-y) 
+
+discrepancy<-function(xx,yy) {
+  mapped = mapply(function(x,y) x*log(y)+(1-x)*log(1-y),xx,yy)
+mean(mapped)}
+
+```
+
+## 2 data exploration
+```{r dataExploration}
+summary(train)
+```
+
+##remove NA
+```{r NA}
+na.convert.mean = function (frame) 
+{
+    vars <- names(frame)
+    if (!is.null(resp <- attr(attr(frame, "terms"), "response"))) {
+        vars <- vars[-resp]
+        x <- frame[[resp]]
+        pos <- is.na(x)
+        if (any(pos)) {
+            frame <- frame[!pos, , drop = FALSE]
+            warning(paste(sum(pos), "observations omitted due to missing values in the response"))
+        }
+    }
+    for (j in vars) {  #j is variable names
+        x <- frame[[j]]
+        pos <- is.na(x)
+        if (any(pos)) {
+            if (length(levels(x))) {   # factors
+                xx <- as.character(x)
+                xx[pos] <- "NA"
+                x <- factor(xx, exclude = NULL)
+            }
+            else if (is.matrix(x)) {   # matrices
+                ats <- attributes(x)
+                x.na <- 1*pos
+#               x[pos] <- 0
+                w <- !pos
+                n <- nrow(x)
+                TT <- array(1, c(1, n))
+                xbar <- (TT %*% x)/(TT %*% w)
+                xbar <- t(TT) %*% xbar
+                x[pos] <- xbar[pos]
+                attributes(x) <- ats
+                attributes(x.na) <- ats
+                dimnames(x.na)[[2]]=paste(dimnames(x)[[2]],".na",sep='')
+                frame[[paste(j,".na",sep='')]] <- x.na 
+            } else {   # ordinary numerical vector
+                ats <- attributes(x)
+                x[pos] <- mean(x[!pos])
+#               x[pos] <- 0
+                x.na <- 1*pos
+                frame[[paste(j,".na",sep='')]] <- x.na 
+                attributes(x) <- ats
+            }
+            frame[[j]] <- x
+        }
+    }
+    frame
+}
+
+#train.new=train[ , !(names(train) %in% c("dbdistance","vccdistance"))]
+train.new  = na.convert.mean(train)
+
+```
+
+```{r}
+#qqnorm((train.new$mrrg))
+par(mfrow=c(2,4))
+plot(voted~.,data=train.new)
+```
+
+## transformation
+```{r transformation}
+#convert dependent variable 
+train.new$voted = as.numeric(train.new$voted) 
+train.new$voted[train.new$voted == 1] = 0
+train.new$voted[train.new$voted == 2] = 1
+
+
+train.new$age=log(train.new$age)
+train.new$dbdistance=log(train.new$dbdistance)
+train.new$vccdistance=log(train.new$vccdistance)
+train.new$chldprsnt=sqrt(train.new$chldprsnt)
+train.new$hsonly=log(train.new$hsonly)
+train2=train.new
+par(mfrow = c(3,3))
+for (i in 1:17) {
+  if(i == 1 || i == 2 || i == 8 || i == 9) {
+    plot(train.new[,i], main= colnames(train.new)[i], mgp = c(1,0,0))
+  }
+  else {
+    plotNormalHistogram(train.new[,i], main= colnames(train.new)[i], mgp = c(1,0,0))
+  }
+}
+```
+
+##sampling
+```{r sampling}
+train2=train.new
+#train.new <- train.new[1:30000, ] 
+train.new <- train.new[sample(nrow(train.new)), ]           #sample rows 
+test.new <- train.new[1:10000, ]              #get test set
+train.new <- train.new[(10000+1):nrow(train.new), ] #get training set
+```
+
+```{r}
+
+#basic logit model
+voted.logit1 = glm(voted ~ .*, data = train.new, family = binomial, maxit = 100000)
+stepAIC(voted.logit1)
+#summary(voted.logit1) 
+```
+##selected model
+```{r selected}
+selectedglm=glm(formula = voted ~ gender + cd + hd + age + 
+    party + mrrg + chldprsnt + cath + evang + nonchrst + days.since.reg, 
+    family = binomial, data = train.new, maxit = 1e+05)
+selectedglm
+#predicted = predict(selectedglm,test.new)
+discrepancy(test.new$voted,predict(selectedglm, test.new, type="response"))
+
+```
+## RPART
+```{r tree}
+tree=rpart(voted ~.,data=train.new, method="class")
+#there's only one node
+#voted.glm.pred3 = predict(tree, test.new, type="class")
+#res=xtabs(~voted.glm.pred3+test.new$voted)
+#res
+#(res[1,1] + res[2,2])/(res[1,1]+res[2,2]+res[1,2]+res[2,1])
+```
+
+##Random Forest
+```{r random}
+cvr = rfcv(na.roughfix(test.new[ , !(names(test.new) %in% c("voted"))]),test.new$voted,step=0.9) 
+cbind(nvars=cvr$n.var, error.rate=cvr$error.cv)
+```
+
+##Boosting
+```{r boosting}
+#sparse_matrix <- model.matrix(~.,train.new[-grep('voted', colnames(train.new))],sparse=FALSE)
+#output_vector = train.new["voted"]==1
+#bst <- xgboost(data = sparse_matrix,label=output_vector, max.depth = 2, eta = 1, nthread = 2, nround = 2, objective = "binary:logistic", verbose = 0)
+y <- "voted"
+train.mx <- sparse.model.matrix(voted ~ ., train.new)
+test.mx <- sparse.model.matrix(voted ~ ., test.new)
+dtrain <- xgb.DMatrix(train.mx, label = train.new[,y])
+dtest <- xgb.DMatrix(test.mx, label = test.new[,y])
+```
+```{r}
+train.gdbt <- xgb.train(params = list(objective = "binary:logistic",
+                                      #num_class = 2,
+                                      #eval_metric = "mlogloss",
+                                      #booster = "gblinear",
+                                      eta = 0.1,
+                                      max_depth = 10,
+                                      min_child_weight=2,
+                                      subsample = 1,
+                                      colsample_bytree = 0.5), 
+                                      data = dtrain, 
+                                      nrounds = 20, 
+                                      watchlist = list(train = dtrain, test = dtest))
+discrepancy(test.new$voted,predict(train.gdbt,dtest))
+```
+
+
+```{r}
+a=predict(model,test.new,n.trees=100,type="response")
+b=predict(selectedglm, test.new, type="response")
+c=predict(train.gdbt,dtest)
+discrepancy(test.new$voted,a)
+```
+
+```{r gbm}
+model <- gbm(formula = voted ~ ., 
+             distribution = "bernoulli",
+             data = train.new,interaction.depth = 6,
+             shrinkage = 0.3,
+             bag.fraction = 0.5,
+             train.fraction = 1.0,
+             n.cores = NULL)
+discrepancy(test.new$voted,predict(model,test.new,n.trees=70,type="response"))
+
+voted.glm.pred3 = ifelse(predict(model, test.new, n.trees=70,type="response")>.5, 1, 0)
+res=xtabs(~voted.glm.pred3+test.new$voted)
+res
+(res[1,1] + res[2,2])/(res[1,1]+res[2,2]+res[1,2]+res[2,1])
+```
+
+```{r}
+#check collinearity
+library(car)
+car::vif(voted.logit1)  #imputing 
+```
+
+```{r CV}
+train.new=train2
+#train.new <- train.new[1:30000, ] 
+discrep=list()
+for(i in 1:10){
+train.new <- train.new[sample(nrow(train.new)), ]           #sample rows 
+test.new <- train.new[1:10000, ]              #get test set
+train.new <- train.new[(10000+1):nrow(train.new), ] #get training set
+model <- gbm(formula = voted ~ ., 
+             distribution = "bernoulli",
+             data = train.new,interaction.depth = 5,
+             shrinkage = 0.3,
+             bag.fraction = 0.5,
+             train.fraction = 1.0,
+             n.cores = NULL)
+"current"
+dis=discrepancy(test.new$voted,predict(model,test.new,n.trees=100,type="response"))
+dis
+discrep[[i]]=dis
+}
+Reduce("+",discrep)/10
+```

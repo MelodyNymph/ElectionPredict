@@ -1,0 +1,495 @@
+---
+title: "data_explore"
+author: "Bingfeng Xia"
+date: "3/29/2017"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1 upload data
+```{r uploadData}
+train = read.csv(file = "train.csv", header = T)
+test = read.csv(file = "test.csv", header = T)
+```
+
+```{r}
+#convert dependent variable 
+train$voted = as.numeric(train$voted) 
+train$voted[train$voted == 1] = 0
+train$voted[train$voted == 2] = 1
+```
+
+## 2 data exploration
+```{r dataExploration}
+summary(train)
+```
+
+dbdistance and vccdistance 
+gender+cd+hd+age+dbdistance+vccdistance+
+party+racename+hsonly+mrrg+chldprsnt+cath+
+evang+nonchrst+otherchrst+days.since.reg
+
+gender+cd+hd+age+party+racename+hsonly+mrrg+chldprsnt+cath+
+evang+nonchrst+otherchrst+days.since.reg
+
+```{r}
+train.na = na.convert.mean(train)
+summary(train.na)
+```
+
+```{r}
+Pidx = sample(nrow(train.na), replace=FALSE)
+test.new = train.na[Pidx[1:10000],]
+train.new = train.na[Pidx[10000:nrow(train.na)],]
+var = c("voted","gender","cd","hd","age","party","racename","hsonly","mrrg",
+         "chldprsnt","cath","evang","nonchrst","otherchrst",
+         "days.since.reg")
+test.new = test.new[,var]
+train.new = train.new[,var]
+```
+
+
+```{r}
+#basic full logit model
+voted.logit0 = glm(voted ~ ., 
+                   data = train.new, family = binomial, maxit = 100000)
+test.pred = predict(voted.logit0, test.new, type="response")
+voted.glm.pred0 = ifelse(test.pred>.5, 1, 0)
+res=xtabs(~voted.glm.pred0+test.new$voted)
+res
+(res[1,1] + res[2,2])/(res[1,1]+res[2,2]+res[1,2]+res[2,1])
+```
+
+```{r}
+discrepancy<-function(xx,yy) {
+  mapped = mapply(function(x,y) x*log(y)+(1-x)*log(1-y),xx,yy)
+mean(mapped)}
+discrepancy(test.new$voted, test.pred)
+```
+
+```{r}
+summary(voted.logit0)
+```
+
+
+
+
+
+
+
+
+
+
+### colinearity
+
+```{r}
+#check collinearity
+library(car)
+car::vif(voted.logit0)  #imputing 
+```
+
+```{r}
+par(mfrow = c(2,3))
+plot(train.new$cath, train.new$evang)
+plot(train.new$cath, train.new$nonchrst)
+plot(train.new$cath, train.new$otherchrst)
+plot(train.new$evang, train.new$nonchrst)
+plot(train.new$evang, train.new$otherchrst)
+plot(train.new$nonchrst, train.new$otherchrst)
+```
+
+
+```{r}
+#logit model for colinearity
+var = c("voted","gender","cd","hd","age","party","racename","hsonly","mrrg",
+         "chldprsnt","evang","nonchrst","otherchrst",
+         "days.since.reg")
+test.coli = test.new[,var]
+train.coli = train.new[,var]
+voted.logit.coli = glm(voted ~ ., 
+                   data = train.coli, family = binomial, maxit = 100000)
+test.pred.coli=predict(voted.logit.coli, test.coli, type="response")
+voted.glm.pred.coli = ifelse(test.pred.coli>.5, 1, 0)
+res=xtabs(~voted.glm.pred.coli+test.coli$voted)
+res
+(res[1,1] + res[2,2])/(res[1,1]+res[2,2]+res[1,2]+res[2,1])
+```
+```{r}
+discrepancy<-function(xx,yy) {
+  mapped = mapply(function(x,y) x*log(y)+(1-x)*log(1-y),xx,yy)
+mean(mapped)}
+discrepancy(test.coli$voted, test.pred.coli)
+```
+
+```{r}
+car::vif(voted.logit.coli)  #imputing 
+```
+
+
+
+
+
+
+### data transformation
+
+#### for paper
+
+```{r}
+par(mfrow = c(2,3))
+hist(train[,5], main= colnames(train)[5], mgp = c(1,0,0))
+hist(train[,10], main= colnames(train)[10], mgp = c(1,0,0))
+hist(train[,12], main= colnames(train)[12], mgp = c(1,0,0))
+train.trans = train
+train.trans$age=log(train$age)
+train.trans$chldprsnt=sqrt(train$chldprsnt)
+train.trans$hsonly=log(train$hsonly)
+hist(train.trans[,5], main= colnames(train.trans)[5], mgp = c(1,0,0))
+hist(train.trans[,10], main= colnames(train.trans)[10], mgp = c(1,0,0))
+hist(train.trans[,12], main= colnames(train.trans)[12], mgp = c(1,0,0))
+```
+
+
+
+```{r}
+par(mfrow = c(3,3))
+for (i in 1:17) {
+  if(i == 1 || i == 2 || i == 8 || i == 9) {
+    plot(train[,i], main= colnames(train)[i], mgp = c(1,0,0))
+  }
+  else {
+    hist(train[,i], main= colnames(train)[i], mgp = c(1,0,0))
+  }
+}
+```
+
+```{r}
+train.trans = train
+train.trans$age=log(train$age)
+train.trans$dbdistance=log(train$dbdistance)
+train.trans$vccdistance=log(train$vccdistance)
+train.trans$chldprsnt=sqrt(train$chldprsnt)
+train.trans$hsonly=log(train$hsonly)
+```
+
+
+```{r}
+par(mfrow = c(3,3))
+for (i in 1:17) {
+  if(i == 1 || i == 2 || i == 8 || i == 9) {
+    plot(train.trans[,i], main= colnames(train.trans)[i], mgp = c(1,0,0))
+  }
+  else {
+    hist(train.trans[,i], main= colnames(train.trans)[i], mgp = c(1,0,0))
+  }
+}
+```
+
+
+```{r}
+train.coli.trans = train.coli
+test.coli.trans = test.coli
+test.coli.trans$age=log(test.coli$age)
+test.coli.trans$chldprsnt=log(test.coli$chldprsnt)
+test.coli.trans$hsonly=log(test.coli$hsonly)
+```
+
+
+```{r}
+voted.logit.coli.trans = glm(voted ~ ., 
+                   data = train.coli.trans, family = binomial, maxit = 100000)
+
+test.pred.coli.trans = predict(voted.logit.coli.trans, test.coli.trans, type="response")
+voted.glm.pred.coli.trans = ifelse(test.pred.coli.trans>.5, 1, 0)
+res=xtabs(~voted.glm.pred.coli.trans+test.coli.trans$voted)
+res
+(res[1,1] + res[2,2])/(res[1,1]+res[2,2]+res[1,2]+res[2,1])
+```
+```{r}
+discrepancy<-function(xx,yy) {
+  mapped = mapply(function(x,y) x*log(y)+(1-x)*log(1-y),xx,yy)
+mean(mapped)}
+discrepancy(test.coli.trans$voted, test.pred.coli.trans)
+```
+
+```{r}
+car::vif(voted.logit.coli.trans)  #imputing 
+```
+
+
+
+
+
+
+
+
+
+
+### MyStep model selection
+### GLM
+
+```{r}
+source("myStep.R")
+```
+
+var = c("voted","gender","cd","hd","age","party","racename","hsonly","mrrg",
+         "chldprsnt","evang","nonchrst","otherchrst",
+         "days.since.reg")
+
+```{r}
+train.coli.trans.fac = train.coli.trans
+train.coli.trans.fac$gender = as.factor(train.coli.trans.fac$gender)
+train.coli.trans.fac$cd = as.factor(train.coli.trans.fac$cd)
+train.coli.trans.fac$hd = as.factor(train.coli.trans.fac$hd)
+train.coli.trans.fac$party = as.factor(train.coli.trans.fac$party)
+train.coli.trans.fac$racename = as.factor(train.coli.trans.fac$racename)
+
+#summary(train.coli.trans.fac$cd)
+#nrow(train.coli.trans.fac)
+train.coli.trans.fac=train.coli.trans.fac[train.coli.trans.fac$cd != 3.76732727564184,]
+summary(train.coli.trans.fac$cd)
+#summary(train.coli.trans.fac)
+#summary(train.coli.trans.fac$racename)
+```
+```{r}
+test.coli.trans.fac = test.coli.trans
+test.coli.trans.fac$gender = as.factor(test.coli.trans.fac$gender)
+test.coli.trans.fac$cd = as.factor(test.coli.trans.fac$cd)
+test.coli.trans.fac$hd = as.factor(test.coli.trans.fac$hd)
+test.coli.trans.fac$party = as.factor(test.coli.trans.fac$party)
+test.coli.trans.fac$racename = as.factor(test.coli.trans.fac$racename)
+test.coli.trans.fac=train.coli.trans.fac[test.coli.trans.fac$cd != 3.76732727564184,]
+summary(test.coli.trans.fac$cd)
+```
+
+
+
+```{r}
+#fit = glm(voted~1,data=train.coli.trans.fac,family="binomial")
+#out = myStep(fit,data=train.coli.trans.fac,K=1,test="Chisq",direction="forward",fast=FALSE)
+```
+
+```{r}
+voted.glm.sel1 = glm(formula = voted ~ hd + age + party + mrrg + 
+                       days.since.reg + chldprsnt + gender + racename + 
+                       nonchrst + evang + otherchrst + cd, 
+                     family = "binomial", data = train.coli.trans.fac)
+```
+
+```{r}
+voted.logit.coli.trans.13 = glm(formula = voted ~ hd + hsonly + age + party + mrrg + 
+                                  days.since.reg + chldprsnt + gender + racename + 
+                                  nonchrst + evang + otherchrst + cd, 
+                                family = "binomial", data = train.coli.trans.fac)
+# final model
+voted.glm.sel1 = glm(formula = voted ~ hd + age + party + mrrg + 
+                       days.since.reg + chldprsnt + gender + racename + 
+                       nonchrst + evang + otherchrst + cd, 
+                     family = "binomial", data = train.coli.trans.fac)
+anova(voted.logit.coli.trans.13, voted.glm.sel1, test = "Chi")
+```
+
+
+```{r}
+voted.glm.sel1.pred=ifelse(predict(voted.glm.sel1, test.coli.trans.fac, type="response")>.5, 1, 0)
+res=xtabs(~voted.glm.sel1.pred+test.coli.trans.fac$voted)
+res
+(res[1,1] + res[2,2])/(res[1,1]+res[2,2]+res[1,2]+res[2,1])
+```
+
+```{r}
+voted.glm.sel1.pred.response = predict(voted.glm.sel1, test.coli.trans.fac, type="response")
+discrepancy<-function(xx,yy) {
+  mapped = mapply(function(x,y) x*log(y)+(1-x)*log(1-y),xx,yy)
+mean(mapped)}
+discrepancy(test.coli.trans.fac$voted, voted.glm.sel1.pred.response)
+```
+
+**"hsonly"** deleted
+
+### GAM model selection
+
+```{r}
+formula = getGAMformula(voted~hd + age + party + mrrg + days.since.reg + 
+    chldprsnt + gender + racename + nonchrst + evang + otherchrst + 
+    cd, data=train.coli.trans.fac)
+formula 
+fit = gam(formula ,data=train.coli.trans.fac, family="binomial")
+out = myStep(fit,data=train.coli.trans.fac,
+             testMethod="anova",test="Chisq",
+             direction="backward",K=1,fast=TRUE)
+```
+
+
+```{r}
+# final GAM model
+library(mgcv)
+voted.gam.sel1 = gam(voted ~ hd + s(age) + party + s(mrrg) + 
+                       s(days.since.reg) + s(chldprsnt) + gender + racename + 
+                       s(nonchrst) + s(evang) + s(otherchrst) + cd, 
+                     family = "binomial", data = train.coli.trans.fac)
+anova(voted.glm.sel1, voted.gam.sel1, test = "Chi")
+```
+
+```{r}
+anova(voted.glm.sel1, voted.gam.sel1, test = "Chi")
+```
+
+```{r}
+test.pred.gam = predict(voted.gam.sel1, test.coli.trans.fac, type="response")
+voted.gam.sel1.pred=ifelse(test.pred.gam>.5, 1, 0)
+res=xtabs(~voted.gam.sel1.pred+test.coli.trans.fac$voted)
+res
+(res[1,1] + res[2,2])/(res[1,1]+res[2,2]+res[1,2]+res[2,1])
+```
+```{r}
+discrepancy<-function(xx,yy) {
+  mapped = mapply(function(x,y) x*log(y)+(1-x)*log(1-y),xx,yy)
+mean(mapped)}
+discrepancy(test.coli.trans.fac$voted, test.pred.gam)
+```
+
+
+
+## Random Forest Tree
+
+### default r f
+```{r}
+train.coli.trans.fac.nohd =  train.coli.trans.fac[,!(names(train.coli.trans.fac) 
+                                                %in% c("hd"))]
+test.coli.trans.fac.nohd =  test.coli.trans.fac[,!(names(train.coli.trans.fac) 
+                                                %in% c("hd"))]
+```
+```{r}
+library(randomForest)
+voted.rf = randomForest(as.factor(voted)~ age + party + mrrg + 
+                       days.since.reg + chldprsnt + gender + racename + 
+                       nonchrst + evang + otherchrst + cd, 
+                       data=train.coli.trans.fac.nohd, method="class")
+print(voted.rf)
+```
+
+
+```{r}
+library(randomForest)
+voted.rf.prob = randomForest(as.factor(voted)~ age + party + mrrg + 
+                       days.since.reg + chldprsnt + gender + racename + 
+                       nonchrst + evang + otherchrst + cd, 
+                       data=train.coli.trans.fac.nohd, method="prob")
+print(voted.rf.prob)
+```
+
+
+
+```{r}
+voted.rf.pred.prob=predict(voted.rf, test.coli.trans.fac.nohd, type="prob")
+```
+
+```{r}
+#voted.rf.pred.prob[,2]
+```
+
+```{r}
+voted.rf.pred.prob.pro=ifelse(voted.rf.pred.prob[,2]>.5, 1, 0)
+res=xtabs(~voted.rf.pred.prob.pro+test.coli.trans.fac.nohd$voted)
+res
+(res[1,1] + res[2,2])/(res[1,1]+res[2,2]+res[1,2]+res[2,1])
+```
+
+
+```{r}
+discrepancy<-function(xx,yy) {
+  mapped = mapply(function(x,y) x*log(y)+(1-x)*log(1-y),xx,yy)
+mean(mapped)}
+discrepancy(test.coli.trans.fac.nohd$voted, voted.rf.pred.prob[,2])
+```
+
+
+```{r}
+voted.rf.pred=predict(voted.rf, test.coli.trans.fac.nohd, type="class")
+res=xtabs(~voted.rf.pred+test.coli.trans.fac.nohd$voted)
+res
+(res[1,1] + res[2,2])/(res[1,1]+res[2,2]+res[1,2]+res[2,1])
+```
+
+
+### select para, haven't been done
+
+```{r}
+library(randomForest)
+cvr = rfcv(na.roughfix(train.coli.trans.fac.nohd[,!(names(train.coli.trans.fac.nohd) 
+                                                %in% c("voted"))]),train.coli.trans.fac.nohd$voted,step=0.9) 
+cbind(nvars=cvr$n.var, error.rate=cvr$error.cv)
+```
+
+
+
+## Cook's distances
+## Fitted vs deviance residual
+
+### GLM
+```{r q1e}
+library(arm)
+div.fitted = fitted(voted.glm.sel1)
+div.devresid = residuals(voted.glm.sel1,type="deviance")
+div.cooks = cooks.distance(voted.glm.sel1)
+
+plot(div.fitted, div.devresid,
+  xlab="Fitted values",
+  ylab="Deviance residuals",
+  pch=19, col="red", cex=1.0,
+  main="GLM Fitted vs deviance residual")
+abline(h=0,lty=2,col="green")
+```
+
+```{r}
+plot(div.cooks, type="h", lwd=2,
+  xlab="Observation",
+  ylab="Cook's distances",
+  main="GLM Cook's distances")
+abline(h=1,lty=2,col="red")
+```
+
+
+### GAM
+```{r q1e}
+library(arm)
+div.fitted = fitted(voted.gam.sel1)
+div.devresid = residuals(voted.gam.sel1,type="deviance")
+div.cooks = cooks.distance(voted.gam.sel1)
+
+plot(div.fitted, div.devresid,
+  xlab="Fitted values",
+  ylab="Deviance residuals",
+  pch=19, col="red", cex=1.0,
+  main="GAM Fitted vs deviance residual")
+abline(h=0,lty=2,col="green")
+```
+
+```{r}
+plot(div.cooks, type="h", lwd=2,
+  xlab="Observation",
+  ylab="Cook's distances",
+  main="GAM Cook's distances")
+abline(h=1,lty=2,col="red")
+```
+
+
+```{r}
+library(arm)
+library(scales)
+gam12.fitted = fitted(voted.gam.sel1)
+gam12.devresid = residuals(voted.gam.sel1, type="deviance")
+plot(gam12.fitted, gam12.devresid,
+  xlab="Fitted counts",
+  ylab="Deviance residuals",
+  pch=19, col=rgb(red=1, green=0.2, blue=0.5, alpha=0.1), cex=0.5,
+  main="GAM Fitted vs deviance residual plot")
+abline(h=0,lty=2,col="green")
+```
+
+
+
+
